@@ -88,35 +88,43 @@ const approveBorrow = async (req, res) => {
     if (record.status !== 'pending')
       return errorResponse(res, 400, 'Phiếu này không ở trạng thái chờ duyệt');
 
-    const bookIds = record.items.map((i) => i.bookId);
-    const books = await Book.find({ _id: { $in: bookIds } });
+    // Ép kiểu sang ObjectId để so sánh chính xác
+    const bookIds = record.items.map((i) => i.bookId.toString());
+    const books   = await Book.find({ _id: { $in: bookIds } });
+
+    // Kiểm tra stock từng cuốn
     for (const item of record.items) {
       const book = books.find((b) => b._id.toString() === item.bookId.toString());
-      if (!book || book.stock <= 0)
-        return errorResponse(res, 409, `Sách "${item.title}" đã hết trong kho`);
+      if (!book)           return errorResponse(res, 404, `Không tìm thấy sách "${item.title}"`);
+      if (book.stock <= 0) return errorResponse(res, 409, `Sách "${item.title}" đã hết trong kho`);
     }
 
+    // Trừ stock atomic
     const bulkOps = record.items.map((item) => ({
-      updateOne: { filter: { _id: item.bookId }, update: { $inc: { stock: -1 } } },
+      updateOne: {
+        filter: { _id: item.bookId },
+        update: { $inc: { stock: -1 } },
+      },
     }));
     await Book.bulkWrite(bulkOps);
 
+    // Cập nhật phiếu
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 14);
 
-    record.status = 'approved';
+    record.status     = 'approved';
     record.borrowDate = new Date();
-    record.dueDate = dueDate;
-    if (req.body.adminNote) record.adminNote = req.body.adminNote;
+    record.dueDate    = dueDate;
+    record.adminNote  = req.body?.adminNote || '';
+
     await record.save();
 
     return successResponse(res, 200, 'Duyệt phiếu thành công', record);
   } catch (error) {
-    console.error('LỖI APPROVE:', error); // <-- thêm dòng này
+    console.error('LỖI APPROVE:', error);
     return errorResponse(res, 500, error.message);
   }
 };
-
 // Admin xác nhận trả sách → stock + 1
 const returnBorrow = async (req, res) => {
   try {

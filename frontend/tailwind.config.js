@@ -1,15 +1,17 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{vue,js,ts}'],
+  content: ['./index.html', './src/**/*.{vue,js}'],
   theme: {
     extend: {
       colors: {
-        primary: {
-          50:  '#eff6ff',
-          100: '#dbeafe',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
+        navy: {
+          50:  '#E6F1FB',
+          100: '#B5D4F4',
+          200: '#85B7EB',
+          400: '#378ADD',
+          600: '#185FA5',
+          700: '#0C447C',
+          900: '#042C53',
         },
       },
     },
