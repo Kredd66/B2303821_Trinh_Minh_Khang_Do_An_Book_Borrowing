@@ -45,3 +45,52 @@
         @apply bg-red-50 text-red-700 text-xs font-medium px-2.5 py-0.5 rounded-full;
     }
 }
+/* Toast nhỏ gọn */
+.library-toast {
+    font-size: 13px !important;
+    min-height: 44px !important;
+    padding: 10px 14px !important;
+    border-radius: 10px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+.Vue-Toastification__container.bottom-right {
+    bottom: 20px !important;
+    right: 20px !important;
+    width: 300px !important;
+}
+
+.Vue-Toastification__toast--success {
+    background-color: #f0fdf4 !important;
+    color: #166534 !important;
+    border: 1px solid #bbf7d0 !important;
+}
+
+.Vue-Toastification__toast--error {
+    background-color: #fef2f2 !important;
+    color: #991b1b !important;
+    border: 1px solid #fecaca !important;
+}
+
+.Vue-Toastification__toast--warning {
+    background-color: #fffbeb !important;
+    color: #92400e !important;
+    border: 1px solid #fde68a !important;
+}
+
+.Vue-Toastification__toast--info {
+    background-color: #eff6ff !important;
+    color: #1e40af !important;
+    border: 1px solid #bfdbfe !important;
+}
+
+.Vue-Toastification__icon {
+    width: 16px !important;
+    height: 16px !important;
+    margin-right: 8px !important;
+}
+
+.Vue-Toastification__close-button {
+    color: inherit !important;
+    opacity: 0.5 !important;
+}

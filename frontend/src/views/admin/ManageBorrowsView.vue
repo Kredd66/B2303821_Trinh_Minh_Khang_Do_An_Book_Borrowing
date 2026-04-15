@@ -26,7 +26,7 @@
 
     <div v-else class="space-y-3">
       <div v-for="record in records" :key="record._id" class="card">
-        <!-- User info header -->
+        <!-- User info -->
         <div class="flex items-start justify-between mb-3 pb-3 border-b border-gray-50">
           <div>
             <p class="text-sm font-medium text-gray-900">{{ record.user?.name }}</p>
@@ -36,17 +36,26 @@
             </p>
             <p class="text-xs text-gray-400 mt-0.5">
               Ngày gửi: {{ formatDate(record.createdAt) }}
-              <span v-if="record.dueDate"> · Hạn trả: {{ formatDate(record.dueDate) }}</span>
+              <span v-if="record.dueDate">
+                · Hạn trả:
+                <span :class="isLate(record) ? 'text-red-500 font-medium' : ''">
+                  {{ formatDate(record.dueDate) }}
+                  <span v-if="isLate(record)"> (trễ {{ lateDays(record) }} ngày)</span>
+                </span>
+              </span>
+            </p>
+            <!-- Hiển thị phí phạt nếu có -->
+            <p v-if="record.fine > 0" class="text-xs font-medium text-red-600 mt-1">
+              Phí phạt: {{ record.fine.toLocaleString('vi-VN') }}đ
             </p>
           </div>
           <StatusBadge :status="record.status" />
         </div>
 
-        <!-- Books list -->
+        <!-- Books -->
         <div class="space-y-2 mb-3">
           <div
-            v-for="item in record.items"
-            :key="item.bookId"
+            v-for="item in record.items" :key="item.bookId"
             class="flex items-center gap-3 bg-gray-50 rounded-lg p-2"
           >
             <img
@@ -61,7 +70,8 @@
         </div>
 
         <!-- Actions -->
-        <div class="flex gap-2 pt-1">
+        <div class="flex gap-2 flex-wrap pt-1">
+          <!-- Duyệt -->
           <button
             v-if="record.status === 'pending'"
             @click="handleApprove(record._id)"
@@ -70,6 +80,8 @@
           >
             {{ approving === record._id ? 'Đang duyệt...' : 'Duyệt phiếu' }}
           </button>
+
+          <!-- Xác nhận trả -->
           <button
             v-if="['approved','overdue'].includes(record.status)"
             @click="handleReturn(record._id)"
@@ -77,6 +89,16 @@
             class="btn-secondary !py-1.5 !px-4"
           >
             {{ returning === record._id ? 'Đang xử lý...' : 'Xác nhận trả' }}
+          </button>
+
+          <!-- Báo mất sách -->
+          <button
+            v-if="['approved','overdue'].includes(record.status)"
+            @click="handleLost(record._id)"
+            :disabled="losing === record._id"
+            class="btn-danger !py-1.5 !px-4"
+          >
+            {{ losing === record._id ? 'Đang xử lý...' : 'Báo mất sách' }}
           </button>
         </div>
       </div>
@@ -105,24 +127,31 @@ const pagination   = ref({ page: 1, totalPages: 1 })
 const loading      = ref(false)
 const approving    = ref(null)
 const returning    = ref(null)
+const losing       = ref(null)
 const filterStatus = ref('pending')
 
 const statusOptions = [
-  { label: 'Chờ duyệt', value: 'pending' },
+  { label: 'Chờ duyệt', value: 'pending'  },
   { label: 'Đang mượn', value: 'approved' },
-  { label: 'Quá hạn',   value: 'overdue' },
+  { label: 'Quá hạn',   value: 'overdue'  },
   { label: 'Đã trả',    value: 'returned' },
-  { label: 'Tất cả',    value: '' },
+  { label: 'Mất sách',  value: 'lost'     },
+  { label: 'Tất cả',    value: ''         },
 ]
 
 const formatDate = (d) => new Date(d).toLocaleDateString('vi-VN')
+const isLate     = (r) => r.dueDate && new Date(r.dueDate) < new Date() && r.status !== 'returned'
+const lateDays   = (r) => {
+  const diff = new Date() - new Date(r.dueDate)
+  return Math.ceil(diff / (1000 * 60 * 60 * 24))
+}
 
 const fetchData = async (page = 1) => {
   loading.value = true
   try {
     const params = { page, limit: 10 }
     if (filterStatus.value) params.status = filterStatus.value
-    const res = await borrowApi.getAll(params)
+    const res    = await borrowApi.getAll(params)
     records.value    = res.data.data.records
     pagination.value = res.data.data.pagination
   } finally {
@@ -147,13 +176,29 @@ const handleReturn = async (id) => {
   if (!confirm('Xác nhận sinh viên đã mang sách đến trả?')) return
   returning.value = id
   try {
-    await borrowApi.return(id)
-    toast.success('Xác nhận trả sách thành công!')
+    const res = await borrowApi.return(id)
+    const { fineText } = res.data.data
+    toast.success(`Trả sách thành công! ${fineText}`)
     fetchData(pagination.value.page)
   } catch (err) {
     toast.error(err.response?.data?.message || 'Không thể xác nhận trả')
   } finally {
     returning.value = null
+  }
+}
+
+const handleLost = async (id) => {
+  if (!confirm('Xác nhận sách bị mất? Hành động này không thể hoàn tác.')) return
+  losing.value = id
+  try {
+    const res = await borrowApi.reportLost(id)
+    const { fineText } = res.data.data
+    toast.warning(`Đã ghi nhận mất sách. ${fineText}`)
+    fetchData(pagination.value.page)
+  } catch (err) {
+    toast.error(err.response?.data?.message || 'Không thể xử lý')
+  } finally {
+    losing.value = null
   }
 }
 

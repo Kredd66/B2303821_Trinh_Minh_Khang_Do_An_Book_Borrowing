@@ -12,10 +12,13 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(router)
 app.use(Toast, {
-  position: 'top-right',
+  position: 'bottom-right',   // góc phải dưới
   timeout: 3000,
   closeOnClick: true,
   pauseOnHover: true,
+  draggable: false,
+  maxToasts: 3,
+  toastClassName: 'library-toast',
 })
 
 app.mount('#app')

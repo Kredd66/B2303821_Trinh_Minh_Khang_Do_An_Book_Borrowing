@@ -2,7 +2,31 @@
   <div class="max-w-2xl mx-auto">
     <h1 class="text-xl font-medium text-gray-900 mb-6">Giỏ sách mượn</h1>
 
-    <!-- Empty cart -->
+    <!-- Cảnh báo quá hạn -->
+    <div v-if="hasOverdue" class="mb-4 bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3">
+      <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <div>
+        <p class="text-sm font-medium text-red-700">Bạn đang có sách quá hạn</p>
+        <p class="text-xs text-red-500 mt-0.5">
+          Vui lòng mang sách đến trả trước khi gửi yêu cầu mượn mới.
+          <RouterLink to="/history" class="underline font-medium">Xem lịch sử</RouterLink>
+        </p>
+      </div>
+    </div>
+
+    <!-- Cảnh báo đạt giới hạn -->
+    <div v-if="nearLimit" class="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
+      <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <p class="text-sm text-amber-700">
+        Bạn đang mượn <strong>{{ currentBorrowCount }}</strong> / 5 cuốn cho phép.
+      </p>
+    </div>
+
+    <!-- Empty -->
     <div v-if="items.length === 0" class="card text-center py-14">
       <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
         <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
@@ -15,11 +39,7 @@
     <template v-else>
       <!-- Items -->
       <div class="space-y-2.5 mb-5">
-        <div
-          v-for="item in items"
-          :key="item.bookId"
-          class="card flex items-center gap-3 !p-3"
-        >
+        <div v-for="item in items" :key="item.bookId" class="card flex items-center gap-3 !p-3">
           <img
             :src="item.coverImage || `https://placehold.co/60x80/E6F1FB/378ADD?text=?`"
             class="w-10 h-14 object-cover rounded-md flex-shrink-0 border border-gray-100"
@@ -31,9 +51,7 @@
           <button
             @click="removeFromCart(item.bookId)"
             class="flex-shrink-0 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded-md transition-colors"
-          >
-            Xóa
-          </button>
+          >Xóa</button>
         </div>
       </div>
 
@@ -45,22 +63,26 @@
             <span class="font-medium text-gray-900">{{ items.length }} cuốn</span>
           </div>
           <div class="flex justify-between text-sm">
+            <span class="text-gray-500">Đang mượn / giới hạn</span>
+            <span :class="currentBorrowCount >= 4 ? 'text-amber-600 font-medium' : 'font-medium text-gray-900'">
+              {{ currentBorrowCount }} / 5 cuốn
+            </span>
+          </div>
+          <div class="flex justify-between text-sm">
             <span class="text-gray-500">Thời hạn mượn</span>
             <span class="font-medium text-gray-900">14 ngày</span>
           </div>
-          <div class="border-t border-gray-100 pt-2 mt-2">
-            <p class="text-xs text-gray-400">
-              Hạn trả được tính từ ngày Admin duyệt phiếu mượn
-            </p>
+          <div class="border-t border-gray-100 pt-2">
+            <p class="text-xs text-gray-400">Hạn trả được tính từ ngày Admin duyệt phiếu</p>
           </div>
         </div>
 
         <button
           @click="handleSubmit"
-          :disabled="loading"
+          :disabled="loading || hasOverdue || items.length === 0"
           class="btn-primary w-full !py-2.5"
         >
-          {{ loading ? 'Đang gửi yêu cầu...' : 'Gửi yêu cầu mượn' }}
+          {{ loading ? 'Đang gửi...' : hasOverdue ? 'Không thể mượn — đang quá hạn' : 'Gửi yêu cầu mượn' }}
         </button>
       </div>
     </template>
@@ -68,7 +90,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCart } from '../../composables/useCart'
 import { borrowApi } from '../../api/borrowApi'
@@ -78,6 +100,26 @@ const { items, removeFromCart, clearCart } = useCart()
 const router  = useRouter()
 const toast   = useToast()
 const loading = ref(false)
+
+const myBorrows        = ref([])
+const hasOverdue       = ref(false)
+const currentBorrowCount = ref(0)
+
+const nearLimit = computed(() => currentBorrowCount.value >= 4)
+
+onMounted(async () => {
+  try {
+    const res = await borrowApi.getMy({ limit: 50 })
+    myBorrows.value = res.data.data.records
+
+    hasOverdue.value = myBorrows.value.some((r) => r.status === 'overdue')
+    currentBorrowCount.value = myBorrows.value
+      .filter((r) => ['pending', 'approved'].includes(r.status))
+      .reduce((sum, r) => sum + r.items.length, 0)
+  } catch {
+    // Nếu chưa đăng nhập thì bỏ qua
+  }
+})
 
 const handleSubmit = async () => {
   loading.value = true
