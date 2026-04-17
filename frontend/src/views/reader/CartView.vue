@@ -114,8 +114,8 @@ onMounted(async () => {
 
     hasOverdue.value = myBorrows.value.some((r) => r.status === 'overdue')
     currentBorrowCount.value = myBorrows.value
-      .filter((r) => ['pending', 'approved', 'overdue'].includes(r.status))
-      .reduce((sum, r) => sum + r.items.length, 0)
+      .filter((r) => ['pending', 'approved', 'overdue', 'partial_returned'].includes(r.status))
+      .reduce((sum, r) => sum + r.items.filter(i => i.itemStatus === 'borrowing').length, 0)
   } catch {
     // Nếu chưa đăng nhập thì bỏ qua
   }

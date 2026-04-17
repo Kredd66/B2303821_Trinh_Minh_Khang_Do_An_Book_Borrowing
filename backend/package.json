@@ -1,7 +1,10 @@
 {
   "scripts": {
-    "dev":   "nodemon server.js",
+    "dev": "nodemon server.js",
     "start": "node server.js",
     "seed": "node src/utils/seed.js"
+  },
+  "dependencies": {
+    "nodemailer": "^8.0.5"
   }
 }

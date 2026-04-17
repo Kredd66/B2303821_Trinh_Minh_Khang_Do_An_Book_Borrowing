@@ -23,8 +23,7 @@ const validateRegister = [
   body('email')
     .trim()
     .notEmpty().withMessage('Email không được để trống')
-    .isEmail().withMessage('Email không đúng định dạng')
-    .normalizeEmail(),
+    .isEmail().withMessage('Email không đúng định dạng'),
 
   body('password')
     .notEmpty().withMessage('Mật khẩu không được để trống')
@@ -48,8 +47,7 @@ const validateLogin = [
   body('email')
     .trim()
     .notEmpty().withMessage('Email không được để trống')
-    .isEmail().withMessage('Email không đúng định dạng')
-    .normalizeEmail(),
+    .isEmail().withMessage('Email không đúng định dạng'),
 
   body('password')
     .notEmpty().withMessage('Mật khẩu không được để trống'),
