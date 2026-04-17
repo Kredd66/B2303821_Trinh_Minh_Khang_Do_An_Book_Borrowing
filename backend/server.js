@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const dotenv = require('dotenv');
 const connectDB = require('./src/config/db');
 require('./src/jobs/overdue.job');
+require('./src/jobs/reservation.job');
 
 dotenv.config();
 connectDB();
@@ -23,6 +24,7 @@ app.use('/api/categories', require('./src/routes/category.routes'));
 app.use('/api/borrows',        require('./src/routes/borrow.routes'));
 app.use('/api/admin',          require('./src/routes/admin.routes'));
 app.use('/api/notifications',  require('./src/routes/notification.routes'));
+app.use('/api/reservations',   require('./src/routes/reservation.routes'));
 
 app.get('/', (req, res) => res.json({ message: 'Library API is running' }));
 

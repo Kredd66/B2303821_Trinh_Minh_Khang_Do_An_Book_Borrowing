@@ -32,6 +32,13 @@
             >
               Lịch sử
             </RouterLink>
+            <RouterLink
+              to="/reservations"
+              class="text-[#B5D4F4] hover:text-white hover:bg-white/10 text-sm px-3 py-1.5 rounded-md transition-colors"
+              :class="{ '!text-white bg-white/10': $route.path === '/reservations' }"
+            >
+              Đặt trước
+            </RouterLink>
           </template>
 
           <template v-if="auth.isAdmin">

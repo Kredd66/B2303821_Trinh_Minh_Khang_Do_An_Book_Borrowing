@@ -30,6 +30,12 @@ const routes = [
     meta: { requiresAuth: true, role: 'reader' },
   },
   {
+    path: '/reservations',
+    name: 'Reservations',
+    component: () => import('../views/reader/ReservationListView.vue'),
+    meta: { requiresAuth: true, role: 'reader' },
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('../views/reader/ProfileView.vue'),

@@ -1,6 +1,7 @@
 const BorrowRecord = require('../models/BorrowRecord.model');
 const Book = require('../models/Book.model');
 const User = require('../models/User.model');
+const Reservation = require('../models/Reservation.model');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const { createNotification } = require('../utils/notification.util');
 
@@ -58,13 +59,27 @@ const createBorrowRequest = async (req, res) => {
       return errorResponse(res, 409, `Bạn đang mượn sách (chưa trả): "${duplicateTitles}"`);
     }
 
-    // 4. Kiểm tra stock
+    // 4. Kiểm tra stock và Reservation
     const bookIds = items.map(i => i.bookId);
     const books = await Book.find({ _id: { $in: bookIds }, isActive: true });
+    
+    // Tìm các reservation đã được gọi tên của user này
+    const notifiedReservations = await Reservation.find({
+      user: req.user._id,
+      book: { $in: bookIds },
+      status: 'notified'
+    });
+
     for (const item of items) {
       const book = books.find(b => b._id.toString() === item.bookId.toString());
-      if (!book)        return errorResponse(res, 404, `Không tìm thấy sách: "${item.title}"`);
-      if (book.stock <= 0) return errorResponse(res, 409, `Sách đã hết: "${item.title}"`);
+      if (!book) return errorResponse(res, 404, `Không tìm thấy sách: "${item.title}"`);
+      
+      if (book.stock <= 0) {
+        const hasResv = notifiedReservations.some(r => r.book.toString() === item.bookId.toString());
+        if (!hasResv) {
+          return errorResponse(res, 409, `Sách đã hết: "${item.title}". Vui lòng sử dụng tính năng Đặt trước sách.`);
+        }
+      }
     }
 
     // 5. Tạo phiếu — mỗi item mặc định itemStatus = 'borrowing'
@@ -153,20 +168,27 @@ const approveBorrow = async (req, res) => {
     const bookIds = record.items.map(i => i.bookId.toString());
     const books   = await Book.find({ _id: { $in: bookIds } });
 
-    // Kiểm tra stock
+    // Kiểm tra stock và giải quyết Reservation atomic
     for (const item of record.items) {
       const book = books.find(b => b._id.toString() === item.bookId.toString());
-      if (!book)          return errorResponse(res, 404, `Không tìm thấy sách "${item.title}"`);
-      if (book.stock <= 0) return errorResponse(res, 409, `Sách "${item.title}" đã hết trong kho`);
-    }
+      if (!book) return errorResponse(res, 404, `Không tìm thấy sách "${item.title}"`);
+      
+      // Tìm xem user có suất giữ chỗ không
+      const resv = await Reservation.findOneAndUpdate(
+        { user: record.user, book: item.bookId, status: 'notified' },
+        { status: 'fulfilled' }
+      );
 
-    // Trừ stock atomic
-    for (const item of record.items) {
+      if (resv) continue; // Nếu có suất giữ chỗ, không cần trừ stock hiện tại!
+      
+      if (book.stock <= 0) return errorResponse(res, 409, `Sách "${item.title}" đã hết trong kho`);
+      
       const updated = await Book.findOneAndUpdate(
         { _id: item.bookId, stock: { $gt: 0 } },
         { $inc: { stock: -1 } }
       );
       if (!updated) {
+        // Rollback các sách trước đó
         const processedIds = record.items.slice(0, record.items.indexOf(item)).map(i => i.bookId);
         if (processedIds.length > 0) await Book.updateMany({ _id: { $in: processedIds } }, { $inc: { stock: 1 } });
         return errorResponse(res, 409, `Sách "${item.title}" vừa hết trong kho`);
@@ -218,6 +240,7 @@ const returnBorrow = async (req, res) => {
     const now = new Date();
     let addedFine = 0;
     const bulkOps = [];
+    let notifiedUsersForResvMsg = 0;
 
     for (const item of record.items) {
       if (!targetIds.includes(item.bookId.toString())) continue;
@@ -233,7 +256,28 @@ const returnBorrow = async (req, res) => {
       item.itemStatus     = 'returned';
       item.itemReturnDate = now;
 
-      bulkOps.push({ updateOne: { filter: { _id: item.bookId }, update: { $inc: { stock: 1 } } } });
+      // Hàng đợi: Kiểm tra có ai đang chờ cuốn sách này không?
+      const nextUserResv = await Reservation.findOne({ book: item.bookId, status: 'waiting' }).sort('createdAt');
+      
+      if (nextUserResv) {
+        // Có người đang chờ -> Giữ sách (Không cộng stock) -> Chuyển status cho người chờ
+        nextUserResv.status = 'notified';
+        nextUserResv.notifiedAt = now;
+        await nextUserResv.save();
+
+        const bData = await Book.findById(item.bookId, 'title');
+        createNotification(
+          nextUserResv.user._id,
+          'Sách đặt trước đã có mặt! 📚',
+          `Cuốn sách "${bData.title}" bạn đưa vào hàng đợi đã có sẵn. Hãy vào mượn ngay trong vòng 24 giờ tới nhé!`,
+          'success',
+          '/reservations'
+        );
+        notifiedUsersForResvMsg++;
+      } else {
+        // Nếu không có người chờ -> Cộng stock như bình thường
+        bulkOps.push({ updateOne: { filter: { _id: item.bookId }, update: { $inc: { stock: 1 } } } });
+      }
     }
 
     if (bulkOps.length > 0) await Book.bulkWrite(bulkOps);

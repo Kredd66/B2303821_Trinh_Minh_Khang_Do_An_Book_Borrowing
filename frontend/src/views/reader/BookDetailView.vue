@@ -93,24 +93,36 @@
 
             <!-- Actions -->
             <div class="mt-auto flex gap-3 flex-wrap">
+              <!-- Nút Thêm vào giỏ mượn (khi còn sách) -->
               <button
-                v-if="auth.isReader"
+                v-if="auth.isReader && book.stock > 0"
                 @click="handleAddCart"
-                :disabled="book.stock === 0 || isInCart(book._id)"
+                :disabled="isInCart(book._id)"
                 :class="[
                   'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   isInCart(book._id)
                     ? 'bg-[#E6F1FB] text-[#185FA5] cursor-default'
-                    : book.stock === 0
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-[#0C447C] hover:bg-[#185FA5] text-white'
+                    : 'bg-[#0C447C] hover:bg-[#185FA5] text-white'
                 ]"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
                   <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
                 </svg>
-                {{ isInCart(book._id) ? 'Đã có trong giỏ' : book.stock === 0 ? 'Hết sách' : 'Thêm vào giỏ mượn' }}
+                {{ isInCart(book._id) ? 'Đã có trong giỏ' : 'Thêm vào giỏ mượn' }}
+              </button>
+
+              <!-- Nút Đặt trước sách (khi hết sách) -->
+              <button
+                v-if="auth.isReader && book.stock === 0"
+                @click="handleReserve"
+                :disabled="reserving"
+                class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium bg-amber-500 hover:bg-amber-600 text-white transition-colors disabled:opacity-60"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {{ reserving ? 'Đang gửi...' : 'Đặt trước sách' }}
               </button>
 
               <RouterLink
@@ -298,25 +310,29 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { bookApi } from '../../api/bookApi'
 import { useAuthStore } from '../../stores/auth.store'
 import { useCart } from '../../composables/useCart'
+import { bookApi } from '../../api/bookApi'
+import { reservationApi } from '../../api/reservationApi'
 import { useToast } from 'vue-toastification'
 
 const route   = useRoute()
 const auth    = useAuthStore()
+const { items: cartItems, addToCart } = useCart()
 const toast   = useToast()
-const { isInCart, addToCart } = useCart()
 
 const book         = ref(null)
 const relatedBooks = ref([])
 const loading      = ref(true)
+const reserving    = ref(false)
 const activeTab    = ref('description')
 
 const tabs = [
   { key: 'description', label: 'Mô tả sách' },
   { key: 'details',     label: 'Chi tiết sản phẩm' },
 ]
+
+const isInCart = (id) => cartItems.value.some(item => item._id === id)
 
 const fetchBook = async (id) => {
   loading.value  = true
@@ -325,7 +341,6 @@ const fetchBook = async (id) => {
     const res  = await bookApi.getById(id)
     book.value = res.data.data
 
-    // Lấy sách cùng thể loại (loại trừ cuốn đang xem)
     if (book.value.category?._id) {
       const relRes = await bookApi.getAll({
         category: book.value.category._id,
@@ -343,8 +358,30 @@ const fetchBook = async (id) => {
 }
 
 const handleAddCart = () => {
-  const added = addToCart(book.value)
-  if (added) toast.success(`Đã thêm "${book.value.title}" vào giỏ mượn`)
+  if (cartItems.value.length >= 5) {
+    toast.error('Chỉ được mượn tối đa 5 cuốn cùng lúc!')
+    return
+  }
+  
+  if (isInCart(book.value._id)) {
+    toast.warning('Sách này đã có trong giỏ mượn của bạn')
+    return
+  }
+  
+  addToCart(book.value)
+  toast.success(`Đã thêm "${book.value.title}" vào giỏ mượn`)
+}
+
+const handleReserve = async () => {
+  reserving.value = true
+  try {
+    const res = await reservationApi.create({ bookId: book.value._id })
+    toast.success(res.data.message)
+  } catch (error) {
+    toast.error(error.response?.data?.message || 'Không thể đặt trước sách lúc này')
+  } finally {
+    reserving.value = false
+  }
 }
 
 // Re-fetch khi chuyển sang sách liên quan
