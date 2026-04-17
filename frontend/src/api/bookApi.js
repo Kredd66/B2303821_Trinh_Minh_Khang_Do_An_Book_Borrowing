@@ -7,4 +7,5 @@ export const bookApi = {
   update:      (id, data) => api.put(`/books/${id}`, data),
   updateStock: (id, data) => api.patch(`/books/${id}/stock`, data),
   delete:      (id)     => api.delete(`/books/${id}`),
+  restore:     (id)     => api.patch(`/books/${id}/restore`),
 }

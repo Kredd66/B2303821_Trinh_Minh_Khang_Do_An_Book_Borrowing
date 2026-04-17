@@ -21,7 +21,7 @@
             class="text-[#B5D4F4] hover:text-white hover:bg-white/10 text-sm px-3 py-1.5 rounded-md transition-colors"
             :class="{ '!text-white bg-white/10': $route.path === '/' }"
           >
-            Danh sách sách
+            Danh mục sách
           </RouterLink>
 
           <template v-if="auth.isReader">
@@ -36,11 +36,18 @@
 
           <template v-if="auth.isAdmin">
             <RouterLink
+              to="/admin/dashboard"
+              class="text-[#B5D4F4] hover:text-white hover:bg-white/10 text-sm px-3 py-1.5 rounded-md transition-colors"
+              :class="{ '!text-white bg-white/10': $route.path === '/admin/dashboard' }"
+            >
+              Tổng quan
+            </RouterLink>
+            <RouterLink
               to="/admin/books"
               class="text-[#B5D4F4] hover:text-white hover:bg-white/10 text-sm px-3 py-1.5 rounded-md transition-colors"
               :class="{ '!text-white bg-white/10': $route.path.startsWith('/admin/books') }"
             >
-              Quản lý sách
+              Sách
             </RouterLink>
             <RouterLink
               to="/admin/borrows"
@@ -48,6 +55,20 @@
               :class="{ '!text-white bg-white/10': $route.path.startsWith('/admin/borrows') }"
             >
               Quản lý mượn
+            </RouterLink>
+            <RouterLink
+              to="/admin/categories"
+              class="text-[#B5D4F4] hover:text-white hover:bg-white/10 text-sm px-3 py-1.5 rounded-md transition-colors"
+              :class="{ '!text-white bg-white/10': $route.path.startsWith('/admin/categories') }"
+            >
+              Thể loại
+            </RouterLink>
+            <RouterLink
+              to="/admin/users"
+              class="text-[#B5D4F4] hover:text-white hover:bg-white/10 text-sm px-3 py-1.5 rounded-md transition-colors"
+              :class="{ '!text-white bg-white/10': $route.path.startsWith('/admin/users') }"
+            >
+              Độc giả
             </RouterLink>
           </template>
         </div>
@@ -71,12 +92,17 @@
             >{{ cartCount }}</span>
           </RouterLink>
 
+          <!-- Notification Bell (only when logged in) -->
+          <NotificationBell v-if="auth.isAuthenticated" />
+
           <!-- User info & logout -->
           <template v-if="auth.isAuthenticated">
-            <span
+            <RouterLink
+              to="/profile"
               style="background:#185FA5;"
-              class="text-[#B5D4F4] text-xs px-3 py-1.5 rounded-md hidden sm:block"
-            >{{ auth.user.name }}</span>
+              class="text-[#B5D4F4] text-xs px-3 py-1.5 rounded-md hidden sm:block hover:text-white hover:bg-[#124d87] transition-colors"
+              title="Cập nhật hồ sơ"
+            >{{ auth.user.name }}</RouterLink>
             <button
               @click="handleLogout"
               class="text-[#B5D4F4] hover:text-white text-xs px-2 py-1.5 rounded-md hover:bg-white/10 transition-colors"
@@ -100,6 +126,7 @@
 import { useAuthStore } from '../../stores/auth.store'
 import { useCart } from '../../composables/useCart'
 import { useRouter } from 'vue-router'
+import NotificationBell from './NotificationBell.vue'
 
 const auth   = useAuthStore()
 const router = useRouter()

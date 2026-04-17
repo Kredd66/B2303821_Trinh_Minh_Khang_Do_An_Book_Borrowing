@@ -6,6 +6,12 @@ const borrowItemSchema = new mongoose.Schema(
     title:      { type: String, required: true },
     author:     { type: String, required: true },
     coverImage: { type: String, default: '' },
+    // ─── Per-item tracking ───────────────────────────────────
+    itemStatus:      { type: String, enum: ['borrowing', 'returned', 'lost'], default: 'borrowing' },
+    itemDueDate:     { type: Date },    // có thể khác nhau sau gia hạn từng phần
+    itemReturnDate:  { type: Date },
+    renewalRequested: { type: Boolean, default: false },
+    renewalCount:     { type: Number,  default: 0 },
   },
   { _id: false }
 );
@@ -16,14 +22,14 @@ const borrowRecordSchema = new mongoose.Schema(
     items: { type: [borrowItemSchema], required: true },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'returned', 'overdue', 'lost'], // thêm 'lost'
+      enum: ['pending', 'approved', 'partial_returned', 'returned', 'overdue', 'lost'],
       default: 'pending',
     },
     borrowDate: { type: Date },
-    dueDate:    { type: Date },
-    returnDate: { type: Date },
-    fine:       { type: Number, default: 0 },  // phí phạt (VNĐ)
-    adminNote:  { type: String, default: '' },
+    dueDate:    { type: Date },   // ngày hết hạn gốc khi duyệt
+    returnDate: { type: Date },   // khi toàn bộ phiếu kết thúc
+    fine:       { type: Number, default: 0 },
+    adminNote:  { type: String,  default: '' },
   },
   { timestamps: true }
 );

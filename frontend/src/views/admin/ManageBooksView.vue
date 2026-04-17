@@ -29,9 +29,15 @@
           Danh sách sách
           <span class="text-gray-400 font-normal ml-1">({{ pagination.total }})</span>
         </h2>
-        <button @click="openModal()" class="btn-primary !py-1.5 !px-3 !text-xs">
-          + Thêm sách
-        </button>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
+            <input type="checkbox" v-model="showHidden" @change="fetchData(1)" class="rounded text-blue-600 border-gray-300 focus:ring-blue-500">
+            Hiện sách đã ẩn
+          </label>
+          <button @click="openModal()" class="btn-primary !py-1.5 !px-3 !text-xs">
+            + Thêm sách
+          </button>
+        </div>
       </div>
 
       <!-- Table -->
@@ -50,6 +56,7 @@
               v-for="book in books"
               :key="book._id"
               class="hover:bg-gray-50/50 transition-colors"
+              :class="!book.isActive ? 'bg-gray-50 opacity-75' : ''"
             >
               <td class="px-5 py-3">
                 <div class="flex items-center gap-3">
@@ -58,7 +65,10 @@
                     class="w-8 h-11 object-cover rounded flex-shrink-0 border border-gray-100"
                   />
                   <div class="min-w-0">
-                    <p class="text-sm font-medium text-gray-800 truncate max-w-xs">{{ book.title }}</p>
+                    <p class="text-sm font-medium text-gray-800 truncate max-w-xs">
+                      {{ book.title }}
+                      <span v-if="!book.isActive" class="ml-1 text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">Đã ẩn</span>
+                    </p>
                     <p class="text-xs text-gray-400 truncate">{{ book.author }}</p>
                   </div>
                 </div>
@@ -71,7 +81,7 @@
                 <span class="text-gray-300 text-xs"> / {{ book.totalCopies }}</span>
               </td>
               <td class="px-4 py-3">
-                <div class="flex gap-1.5 justify-center">
+                <div v-if="book.isActive" class="flex gap-1.5 justify-center">
                   <button
                     @click="openModal(book)"
                     class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
@@ -80,6 +90,12 @@
                     @click="handleDelete(book._id)"
                     class="text-xs px-3 py-1.5 border border-red-100 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
                   >Ẩn</button>
+                </div>
+                <div v-else class="flex justify-center">
+                  <button
+                    @click="handleRestore(book._id)"
+                    class="text-xs px-3 py-1.5 border border-green-100 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
+                  >Hiển thị lại</button>
                 </div>
               </td>
             </tr>
@@ -187,6 +203,7 @@ const toast      = useToast()
 const books      = ref([])
 const categories = ref([])
 const pagination = ref({ page: 1, totalPages: 1, total: 0 })
+const showHidden = ref(false)
 const showModal  = ref(false)
 const saving     = ref(false)
 const editBook   = ref(null)
@@ -199,7 +216,10 @@ const form = reactive({
 })
 
 const fetchData = async (page = 1) => {
-  const res = await bookApi.getAll({ page, limit: 15 })
+  const params = { page, limit: 15 }
+  if (showHidden.value) params.showHidden = true
+  
+  const res = await bookApi.getAll(params)
   books.value      = res.data.data.books
   pagination.value = res.data.data.pagination
   stats.total      = res.data.data.pagination.total
@@ -262,6 +282,17 @@ const handleDelete = async (id) => {
     fetchData(pagination.value.page)
   } catch {
     toast.error('Không thể ẩn sách')
+  }
+}
+
+const handleRestore = async (id) => {
+  if (!confirm('Khôi phục hiển thị sách này?')) return
+  try {
+    await bookApi.restore(id)
+    toast.success('Đã hiển thị lại sách')
+    fetchData(pagination.value.page)
+  } catch {
+    toast.error('Không thể khôi phục sách')
   }
 }
 

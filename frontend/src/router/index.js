@@ -29,8 +29,20 @@ const routes = [
     component: () => import('../views/reader/BorrowHistoryView.vue'),
     meta: { requiresAuth: true, role: 'reader' },
   },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('../views/reader/ProfileView.vue'),
+    meta: { requiresAuth: true }, // Both admin and reader can use profile
+  },
 
   // Admin
+  {
+    path: '/admin/dashboard',
+    name: 'AdminDashboard',
+    component: () => import('../views/admin/DashboardView.vue'),
+    meta: { requiresAuth: true, role: 'admin' },
+  },
   {
     path: '/admin/books',
     name: 'AdminBooks',
@@ -41,6 +53,18 @@ const routes = [
     path: '/admin/borrows',
     name: 'AdminBorrows',
     component: () => import('../views/admin/ManageBorrowsView.vue'),
+    meta: { requiresAuth: true, role: 'admin' },
+  },
+  {
+    path: '/admin/categories',
+    name: 'AdminCategories',
+    component: () => import('../views/admin/ManageCategoriesView.vue'),
+    meta: { requiresAuth: true, role: 'admin' },
+  },
+  {
+    path: '/admin/users',
+    name: 'AdminUsers',
+    component: () => import('../views/admin/ManageUsersView.vue'),
     meta: { requiresAuth: true, role: 'admin' },
   },
 
@@ -68,7 +92,7 @@ router.beforeEach((to, from, next) => {
     return next('/')
   }
   if ((to.name === 'Login' || to.name === 'Register') && auth.isAuthenticated) {
-    return next(auth.isAdmin ? '/admin/books' : '/')
+    return next(auth.isAdmin ? '/admin/dashboard' : '/')
   }
 
   next()

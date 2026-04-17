@@ -79,10 +79,10 @@
 
         <button
           @click="handleSubmit"
-          :disabled="loading || hasOverdue || items.length === 0"
+          :disabled="loading || items.length === 0"
           class="btn-primary w-full !py-2.5"
         >
-          {{ loading ? 'Đang gửi...' : hasOverdue ? 'Không thể mượn — đang quá hạn' : 'Gửi yêu cầu mượn' }}
+          {{ loading ? 'Đang gửi...' : 'Gửi yêu cầu mượn' }}
         </button>
       </div>
     </template>
@@ -114,7 +114,7 @@ onMounted(async () => {
 
     hasOverdue.value = myBorrows.value.some((r) => r.status === 'overdue')
     currentBorrowCount.value = myBorrows.value
-      .filter((r) => ['pending', 'approved'].includes(r.status))
+      .filter((r) => ['pending', 'approved', 'overdue'].includes(r.status))
       .reduce((sum, r) => sum + r.items.length, 0)
   } catch {
     // Nếu chưa đăng nhập thì bỏ qua

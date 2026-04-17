@@ -1,12 +1,31 @@
 const BorrowRecord = require('../models/BorrowRecord.model');
 const Book = require('../models/Book.model');
+const User = require('../models/User.model');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
+const { createNotification } = require('../utils/notification.util');
 
 const BORROW_LIMIT = 5;
 const BORROW_DAYS  = 14;
 const FINE_PER_DAY = 2000;
 
-// ─── Reader: Gửi yêu cầu mượn ────────────────────────────────
+// ─── Helper: Tính lại trạng thái phiếu dựa trên trạng thái từng sách ─────────
+const computeRecordStatus = (record) => {
+  const activeItems = record.items.filter(i => i.itemStatus === 'borrowing');
+  const allClosed   = record.items.every(i => ['returned', 'lost'].includes(i.itemStatus));
+
+  if (allClosed) return 'returned';
+  if (activeItems.length < record.items.length) return 'partial_returned'; // một phần đã trả
+
+  // Tất cả vẫn đang mượn — kiểm tra quá hạn
+  const now = new Date();
+  const anyOverdue = activeItems.some(i => {
+    const due = i.itemDueDate || record.dueDate;
+    return due && new Date(due) < now;
+  });
+  return anyOverdue ? 'overdue' : 'approved';
+};
+
+// ─── Reader: Gửi yêu cầu mượn ────────────────────────────────────────────────
 const createBorrowRequest = async (req, res) => {
   try {
     const { items } = req.body;
@@ -14,51 +33,59 @@ const createBorrowRequest = async (req, res) => {
       return errorResponse(res, 400, 'Giỏ sách trống');
 
     // 1. Chặn nếu đang có phiếu quá hạn
-    const hasOverdue = await BorrowRecord.findOne({
-      user: req.user._id,
-      status: 'overdue',
-    });
+    const hasOverdue = await BorrowRecord.findOne({ user: req.user._id, status: 'overdue' });
     if (hasOverdue)
       return errorResponse(res, 403, 'Bạn đang có sách quá hạn chưa trả. Vui lòng trả sách trước khi mượn thêm.');
 
     // 2. Kiểm tra giới hạn số sách đang mượn
     const activeRecords = await BorrowRecord.find({
       user: req.user._id,
-      status: { $in: ['pending', 'approved'] },
+      status: { $in: ['pending', 'approved', 'overdue', 'partial_returned'] },
     });
-    const totalBorrowing = activeRecords.reduce((sum, r) => sum + r.items.length, 0);
+    const totalBorrowing = activeRecords.reduce((sum, r) =>
+      sum + r.items.filter(i => i.itemStatus === 'borrowing').length, 0);
     if (totalBorrowing + items.length > BORROW_LIMIT)
       return errorResponse(res, 403, `Bạn chỉ được mượn tối đa ${BORROW_LIMIT} cuốn cùng lúc. Hiện đang có ${totalBorrowing} cuốn.`);
 
-    // 3. Kiểm tra sách trùng
-    const borrowingBookIds = activeRecords.flatMap((r) =>
-      r.items.map((i) => i.bookId.toString())
+    // 3. Kiểm tra sách trùng lặp
+    const borrowingBookIds = activeRecords.flatMap(r =>
+      r.items.filter(i => i.itemStatus === 'borrowing').map(i => i.bookId.toString())
     );
-    const duplicates = items.filter((i) => borrowingBookIds.includes(i.bookId.toString()));
-    if (duplicates.length > 0)
-      return errorResponse(res, 409, `Bạn đang mượn sách: "${duplicates.map((d) => d.title).join('", "')}"`);
+    const duplicateIds = items.map(i => i.bookId.toString()).filter(id => borrowingBookIds.includes(id));
+    if (duplicateIds.length > 0) {
+      const duplicateBooks = await Book.find({ _id: { $in: duplicateIds } }, 'title');
+      const duplicateTitles = duplicateBooks.map(b => b.title).join('", "');
+      return errorResponse(res, 409, `Bạn đang mượn sách (chưa trả): "${duplicateTitles}"`);
+    }
 
     // 4. Kiểm tra stock
-    const bookIds = items.map((i) => i.bookId);
-    const books   = await Book.find({ _id: { $in: bookIds }, isActive: true });
-
+    const bookIds = items.map(i => i.bookId);
+    const books = await Book.find({ _id: { $in: bookIds }, isActive: true });
     for (const item of items) {
-      const book = books.find((b) => b._id.toString() === item.bookId.toString());
-      if (!book)           return errorResponse(res, 404, `Không tìm thấy sách: "${item.title}"`);
+      const book = books.find(b => b._id.toString() === item.bookId.toString());
+      if (!book)        return errorResponse(res, 404, `Không tìm thấy sách: "${item.title}"`);
       if (book.stock <= 0) return errorResponse(res, 409, `Sách đã hết: "${item.title}"`);
     }
 
-    // 5. Tạo phiếu
+    // 5. Tạo phiếu — mỗi item mặc định itemStatus = 'borrowing'
     const record = await BorrowRecord.create({ user: req.user._id, items });
-    return successResponse(res, 201, 'Gửi yêu cầu mượn thành công', record);
 
+    // Thông báo cho Admin
+    const admins = await User.find({ role: 'admin' }, '_id');
+    await Promise.all(admins.map(admin =>
+      createNotification(admin._id, 'Yêu cầu mượn sách mới',
+        `${req.user.name} vừa gửi yêu cầu mượn ${items.length} cuốn sách. Vui lòng kiểm tra và duyệt.`,
+        'info', '/admin/borrows')
+    ));
+
+    return successResponse(res, 201, 'Gửi yêu cầu mượn thành công', record);
   } catch (error) {
     console.error('LỖI CREATE BORROW:', error);
     return errorResponse(res, 500, error.message);
   }
 };
 
-// ─── Reader: Xem lịch sử ─────────────────────────────────────
+// ─── Reader: Xem lịch sử ──────────────────────────────────────────────────────
 const getMyBorrows = async (req, res) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
@@ -70,7 +97,6 @@ const getMyBorrows = async (req, res) => {
       BorrowRecord.find(query).sort('-createdAt').skip(skip).limit(Number(limit)),
       BorrowRecord.countDocuments(query),
     ]);
-
     return successResponse(res, 200, 'Lịch sử mượn sách', {
       records,
       pagination: { total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) },
@@ -80,12 +106,23 @@ const getMyBorrows = async (req, res) => {
   }
 };
 
-// ─── Admin: Xem tất cả phiếu ─────────────────────────────────
+// ─── Admin: Xem tất cả phiếu ──────────────────────────────────────────────────
 const getAllBorrows = async (req, res) => {
   try {
-    const { page = 1, limit = 15, status } = req.query;
+    const { page = 1, limit = 15, status, search } = req.query;
     const query = {};
     if (status) query.status = status;
+
+    if (search) {
+      const users = await User.find({
+        $or: [
+          { name:      { $regex: search, $options: 'i' } },
+          { email:     { $regex: search, $options: 'i' } },
+          { studentId: { $regex: search, $options: 'i' } },
+        ]
+      }, '_id');
+      query.user = { $in: users.map(u => u._id) };
+    }
 
     const skip = (Number(page) - 1) * Number(limit);
     const [records, total] = await Promise.all([
@@ -96,7 +133,6 @@ const getAllBorrows = async (req, res) => {
         .limit(Number(limit)),
       BorrowRecord.countDocuments(query),
     ]);
-
     return successResponse(res, 200, 'Tất cả phiếu mượn', {
       records,
       pagination: { total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) },
@@ -106,7 +142,7 @@ const getAllBorrows = async (req, res) => {
   }
 };
 
-// ─── Admin: Duyệt phiếu ──────────────────────────────────────
+// ─── Admin: Duyệt phiếu ───────────────────────────────────────────────────────
 const approveBorrow = async (req, res) => {
   try {
     const record = await BorrowRecord.findById(req.params.id);
@@ -114,34 +150,25 @@ const approveBorrow = async (req, res) => {
     if (record.status !== 'pending')
       return errorResponse(res, 400, 'Phiếu này không ở trạng thái chờ duyệt');
 
-    const bookIds = record.items.map((i) => i.bookId.toString());
+    const bookIds = record.items.map(i => i.bookId.toString());
     const books   = await Book.find({ _id: { $in: bookIds } });
 
     // Kiểm tra stock
     for (const item of record.items) {
-      const book = books.find((b) => b._id.toString() === item.bookId.toString());
-      if (!book)           return errorResponse(res, 404, `Không tìm thấy sách "${item.title}"`);
+      const book = books.find(b => b._id.toString() === item.bookId.toString());
+      if (!book)          return errorResponse(res, 404, `Không tìm thấy sách "${item.title}"`);
       if (book.stock <= 0) return errorResponse(res, 409, `Sách "${item.title}" đã hết trong kho`);
     }
 
-    // Dùng $inc atomic để tránh race condition (không cần transaction)
-    // findOneAndUpdate với điều kiện stock > 0 để an toàn
+    // Trừ stock atomic
     for (const item of record.items) {
       const updated = await Book.findOneAndUpdate(
         { _id: item.bookId, stock: { $gt: 0 } },
         { $inc: { stock: -1 } }
       );
       if (!updated) {
-        // Rollback các cuốn đã trừ trước đó
-        const processedIds = record.items
-          .slice(0, record.items.indexOf(item))
-          .map((i) => i.bookId);
-        if (processedIds.length > 0) {
-          await Book.updateMany(
-            { _id: { $in: processedIds } },
-            { $inc: { stock: 1 } }
-          );
-        }
+        const processedIds = record.items.slice(0, record.items.indexOf(item)).map(i => i.bookId);
+        if (processedIds.length > 0) await Book.updateMany({ _id: { $in: processedIds } }, { $inc: { stock: 1 } });
         return errorResponse(res, 409, `Sách "${item.title}" vừa hết trong kho`);
       }
     }
@@ -149,98 +176,258 @@ const approveBorrow = async (req, res) => {
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + BORROW_DAYS);
 
+    // Gán itemDueDate cho từng sách
+    record.items.forEach(item => {
+      item.itemStatus  = 'borrowing';
+      item.itemDueDate = dueDate;
+    });
     record.status     = 'approved';
     record.borrowDate = new Date();
     record.dueDate    = dueDate;
     record.adminNote  = req.body?.adminNote || '';
     await record.save();
 
-    return successResponse(res, 200, 'Duyệt phiếu thành công', record);
+    createNotification(record.user, 'Phiếu mượn được duyệt ✅',
+      `Phiếu mượn sách của bạn đã được duyệt! Vui lòng đến thư viện nhận sách. Hạn trả: ${dueDate.toLocaleDateString('vi-VN')}.`,
+      'success', '/history');
 
+    return successResponse(res, 200, 'Duyệt phiếu thành công', record);
   } catch (error) {
     console.error('LỖI APPROVE:', error);
     return errorResponse(res, 500, error.message);
   }
 };
 
-// ─── Admin: Xác nhận trả sách ────────────────────────────────
+// ─── Admin: Xác nhận trả (hỗ trợ trả từng phần) ─────────────────────────────
 const returnBorrow = async (req, res) => {
   try {
     const record = await BorrowRecord.findById(req.params.id);
     if (!record) return errorResponse(res, 404, 'Không tìm thấy phiếu mượn');
-    if (!['approved', 'overdue'].includes(record.status))
-      return errorResponse(res, 400, 'Phiếu này chưa được duyệt hoặc đã trả rồi');
+    if (!['approved', 'overdue', 'partial_returned'].includes(record.status))
+      return errorResponse(res, 400, 'Phiếu không ở trạng thái đang mượn');
 
-    // Tính phí phạt
-    let fine = 0;
-    if (record.dueDate && new Date() > new Date(record.dueDate)) {
-      const diffMs   = new Date() - new Date(record.dueDate);
-      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      fine = diffDays * FINE_PER_DAY;
+    const { bookIds, returnNote } = req.body;
+    // Nếu không truyền bookIds → trả tất cả sách đang mượn
+    const targetIds = bookIds?.length
+      ? bookIds.map(String)
+      : record.items.filter(i => i.itemStatus === 'borrowing').map(i => i.bookId.toString());
+
+    if (targetIds.length === 0)
+      return errorResponse(res, 400, 'Không có sách nào được chọn để trả');
+
+    const now = new Date();
+    let addedFine = 0;
+    const bulkOps = [];
+
+    for (const item of record.items) {
+      if (!targetIds.includes(item.bookId.toString())) continue;
+      if (item.itemStatus !== 'borrowing') continue;
+
+      // Tính phí phạt theo hạn từng cuốn
+      const due = item.itemDueDate || record.dueDate;
+      if (due && now > new Date(due)) {
+        const days = Math.ceil((now - new Date(due)) / (1000 * 60 * 60 * 24));
+        addedFine += days * FINE_PER_DAY;
+      }
+
+      item.itemStatus     = 'returned';
+      item.itemReturnDate = now;
+
+      bulkOps.push({ updateOne: { filter: { _id: item.bookId }, update: { $inc: { stock: 1 } } } });
     }
 
-    // Cộng stock atomic
-    const bulkOps = record.items.map((item) => ({
-      updateOne: {
-        filter: { _id: item.bookId },
-        update: { $inc: { stock: 1 } },
-      },
-    }));
-    await Book.bulkWrite(bulkOps);
+    if (bulkOps.length > 0) await Book.bulkWrite(bulkOps);
 
-    record.status     = 'returned';
-    record.returnDate = new Date();
-    record.fine       = fine;
-    if (req.body?.returnNote) record.adminNote = req.body.returnNote;
+    record.fine     = (record.fine || 0) + addedFine;
+    record.status   = computeRecordStatus(record);
+    if (['returned'].includes(record.status)) record.returnDate = now;
+    if (returnNote) record.adminNote = returnNote;
     await record.save();
+
+    const returnedCount = bulkOps.length;
+    const stillBorrowing = record.items.filter(i => i.itemStatus === 'borrowing').length;
+
+    createNotification(record.user, 'Xác nhận trả sách ✅',
+      addedFine > 0
+        ? `Thư viện đã nhận lại ${returnedCount} cuốn sách. Phí phạt: ${addedFine.toLocaleString('vi-VN')}đ.${stillBorrowing > 0 ? ` Bạn còn ${stillBorrowing} cuốn chưa trả.` : ''}`
+        : `Thư viện đã nhận lại ${returnedCount} cuốn sách.${stillBorrowing > 0 ? ` Bạn còn ${stillBorrowing} cuốn chưa trả.` : ' Cảm ơn bạn!'}`,
+      addedFine > 0 ? 'warning' : 'success', '/history');
 
     return successResponse(res, 200, 'Xác nhận trả sách thành công', {
       record,
-      fine,
-      fineText: fine > 0
-        ? `Phí phạt: ${fine.toLocaleString('vi-VN')}đ`
-        : 'Không có phí phạt',
+      fine: addedFine,
+      fineText: addedFine > 0 ? `Phí phạt: ${addedFine.toLocaleString('vi-VN')}đ` : 'Không có phí phạt',
+      returnedCount,
+      stillBorrowing,
     });
-
   } catch (error) {
     console.error('LỖI RETURN:', error);
     return errorResponse(res, 500, error.message);
   }
 };
 
-// ─── Admin: Báo mất sách ─────────────────────────────────────
+// ─── Admin: Báo mất sách (hỗ trợ từng phần) ──────────────────────────────────
 const reportLostBook = async (req, res) => {
   try {
     const record = await BorrowRecord.findById(req.params.id);
     if (!record) return errorResponse(res, 404, 'Không tìm thấy phiếu mượn');
-    if (!['approved', 'overdue'].includes(record.status))
+    if (!['approved', 'overdue', 'partial_returned'].includes(record.status))
       return errorResponse(res, 400, 'Phiếu không ở trạng thái đang mượn');
 
-    const lostFine = record.items.length * 30 * FINE_PER_DAY;
+    const { bookIds, note } = req.body;
+    const targetIds = bookIds?.length
+      ? bookIds.map(String)
+      : record.items.filter(i => i.itemStatus === 'borrowing').map(i => i.bookId.toString());
 
-    // Trừ totalCopies (sách mất thì không cộng stock)
-    const bulkOps = record.items.map((item) => ({
-      updateOne: {
-        filter: { _id: item.bookId },
-        update: { $inc: { totalCopies: -1 } },
-      },
-    }));
-    await Book.bulkWrite(bulkOps);
+    if (targetIds.length === 0)
+      return errorResponse(res, 400, 'Không có sách nào được chọn');
 
-    record.status     = 'lost';
-    record.returnDate = new Date();
-    record.fine       = lostFine;
-    record.adminNote  = req.body?.note || 'Sách bị mất';
+    let lostFine = 0;
+    const bulkOps = [];
+
+    for (const item of record.items) {
+      if (!targetIds.includes(item.bookId.toString())) continue;
+      if (item.itemStatus !== 'borrowing') continue;
+
+      lostFine += 30 * FINE_PER_DAY; // phí đền bù 30 ngày / cuốn
+      item.itemStatus     = 'lost';
+      item.itemReturnDate = new Date();
+
+      // Trừ totalCopies (sách mất không cộng stock)
+      bulkOps.push({ updateOne: { filter: { _id: item.bookId }, update: { $inc: { totalCopies: -1 } } } });
+    }
+
+    if (bulkOps.length > 0) await Book.bulkWrite(bulkOps);
+
+    record.fine    = (record.fine || 0) + lostFine;
+    record.status  = computeRecordStatus(record);
+    if (record.status === 'returned') record.returnDate = new Date();
+    record.adminNote = note || record.adminNote || 'Sách bị mất';
     await record.save();
+
+    createNotification(record.user, 'Sách bị báo mất ⚠️',
+      `Hệ thống ghi nhận ${targetIds.length} cuốn sách trong phiếu mượn bị mất. Phí đền bù: ${lostFine.toLocaleString('vi-VN')}đ.`,
+      'danger', '/history');
 
     return successResponse(res, 200, 'Đã ghi nhận mất sách', {
       record,
       fine: lostFine,
       fineText: `Phí đền bù: ${lostFine.toLocaleString('vi-VN')}đ`,
     });
-
   } catch (error) {
     console.error('LỖI LOST:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+// ─── Reader: Hủy phiếu pending ────────────────────────────────────────────────
+const cancelBorrow = async (req, res) => {
+  try {
+    const record = await BorrowRecord.findById(req.params.id);
+    if (!record) return errorResponse(res, 404, 'Không tìm thấy phiếu mượn');
+    if (record.user.toString() !== req.user._id.toString())
+      return errorResponse(res, 403, 'Bạn không có quyền hủy phiếu này');
+    if (record.status !== 'pending')
+      return errorResponse(res, 400, 'Chỉ có thể hủy phiếu đang chờ duyệt');
+
+    await record.deleteOne();
+    return successResponse(res, 200, 'Đã hủy yêu cầu mượn thành công');
+  } catch (error) {
+    console.error('LỖI CANCEL:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+// ─── Reader: Xin gia hạn (hỗ trợ từng phần) ─────────────────────────────────
+const requestRenewal = async (req, res) => {
+  try {
+    const record = await BorrowRecord.findById(req.params.id);
+    if (!record) return errorResponse(res, 404, 'Không tìm thấy phiếu mượn');
+    if (record.user.toString() !== req.user._id.toString())
+      return errorResponse(res, 403, 'Bạn không có quyền thao tác trên phiếu này');
+    if (!['approved', 'partial_returned'].includes(record.status))
+      return errorResponse(res, 400, 'Chỉ có thể gia hạn sách đang mượn');
+
+    const { bookIds } = req.body;
+    const targetIds = bookIds?.length
+      ? bookIds.map(String)
+      : record.items.filter(i => i.itemStatus === 'borrowing').map(i => i.bookId.toString());
+
+    if (targetIds.length === 0)
+      return errorResponse(res, 400, 'Không có sách nào được chọn để gia hạn');
+
+    let anyUpdated = false;
+    for (const item of record.items) {
+      if (!targetIds.includes(item.bookId.toString())) continue;
+      if (item.itemStatus !== 'borrowing') continue;
+      if (item.renewalCount >= 1) continue; // đã gia hạn rồi
+      if (item.renewalRequested)  continue; // đang chờ duyệt
+      item.renewalRequested = true;
+      anyUpdated = true;
+    }
+
+    if (!anyUpdated)
+      return errorResponse(res, 400, 'Không có sách nào hợp lệ để xin gia hạn (đã gia hạn hoặc đang chờ duyệt)');
+
+    await record.save();
+
+    const admins = await User.find({ role: 'admin' }, '_id');
+    await Promise.all(admins.map(admin =>
+      createNotification(admin._id, 'Yêu cầu gia hạn sách ⏳',
+        `${req.user.name} vừa gửi yêu cầu gia hạn thêm 7 ngày. Vui lòng xem xét và duyệt.`,
+        'info', '/admin/borrows')
+    ));
+
+    return successResponse(res, 200, 'Đã gửi yêu cầu gia hạn thành công');
+  } catch (error) {
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+// ─── Admin: Duyệt gia hạn (hỗ trợ từng phần) ────────────────────────────────
+const approveRenewal = async (req, res) => {
+  try {
+    const record = await BorrowRecord.findById(req.params.id);
+    if (!record) return errorResponse(res, 404, 'Không tìm thấy phiếu mượn');
+
+    const { bookIds } = req.body;
+    const targetIds = bookIds?.length
+      ? bookIds.map(String)
+      : record.items.filter(i => i.renewalRequested).map(i => i.bookId.toString());
+
+    if (targetIds.length === 0)
+      return errorResponse(res, 400, 'Không có sách nào đang chờ duyệt gia hạn');
+
+    let anyUpdated = false;
+    for (const item of record.items) {
+      if (!targetIds.includes(item.bookId.toString())) continue;
+      if (!item.renewalRequested) continue;
+
+      const newDue = new Date(item.itemDueDate || record.dueDate);
+      newDue.setDate(newDue.getDate() + 7);
+      item.itemDueDate      = newDue;
+      item.renewalRequested = false;
+      item.renewalCount    += 1;
+      anyUpdated = true;
+    }
+
+    if (!anyUpdated)
+      return errorResponse(res, 400, 'Không có sách nào hợp lệ để duyệt gia hạn');
+
+    // Cập nhật lại record.dueDate = max itemDueDate của các sách đang mượn
+    const activeDueDates = record.items
+      .filter(i => i.itemStatus === 'borrowing' && i.itemDueDate)
+      .map(i => new Date(i.itemDueDate));
+    if (activeDueDates.length > 0) record.dueDate = new Date(Math.max(...activeDueDates));
+
+    await record.save();
+
+    createNotification(record.user, 'Yêu cầu gia hạn được duyệt ✅',
+      `Thư viện đã chấp thuận yêu cầu gia hạn. ${targetIds.length} cuốn sách đã được kéo dài thêm 7 ngày.`,
+      'success', '/history');
+
+    return successResponse(res, 200, 'Đã duyệt gia hạn thêm 7 ngày');
+  } catch (error) {
     return errorResponse(res, 500, error.message);
   }
 };
@@ -252,4 +439,7 @@ module.exports = {
   approveBorrow,
   returnBorrow,
   reportLostBook,
+  cancelBorrow,
+  requestRenewal,
+  approveRenewal,
 };

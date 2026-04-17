@@ -16,6 +16,10 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Token không hợp lệ' });
     }
 
+    if (req.user.isActive === false) {
+      return res.status(403).json({ success: false, message: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin.' });
+    }
+
     next();
   } catch (error) {
     return res.status(401).json({ success: false, message: 'Token hết hạn hoặc không hợp lệ' });

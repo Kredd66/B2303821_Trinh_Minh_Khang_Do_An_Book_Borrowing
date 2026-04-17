@@ -3,8 +3,19 @@ const { successResponse, errorResponse } = require('../utils/apiResponse');
 
 const getBooks = async (req, res) => {
   try {
-    const { page = 1, limit = 12, search, category, sort = '-createdAt' } = req.query;
+    const { page = 1, limit = 12, search, category, sort = '-createdAt', showHidden } = req.query;
     const query = { isActive: true };
+
+    if (showHidden === 'true' && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      try {
+        const token = req.headers.authorization.split(' ')[1];
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const User = require('../models/User.model');
+        const user = await User.findById(decoded.id);
+        if (user && user.role === 'admin') delete query.isActive;
+      } catch (err) {}
+    }
 
     if (search) query.$text = { $search: search };
     if (category) query.category = category;
@@ -107,4 +118,18 @@ const deleteBook = async (req, res) => {
   }
 };
 
-module.exports = { getBooks, getBookById, createBook, updateBook, updateStock, deleteBook };
+const restoreBook = async (req, res) => {
+  try {
+    const book = await Book.findByIdAndUpdate(
+      req.params.id,
+      { isActive: true },
+      { new: true }
+    );
+    if (!book) return errorResponse(res, 404, 'Không tìm thấy sách');
+    return successResponse(res, 200, 'Đã khôi phục sách thành công');
+  } catch (error) {
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+module.exports = { getBooks, getBookById, createBook, updateBook, updateStock, deleteBook, restoreBook };

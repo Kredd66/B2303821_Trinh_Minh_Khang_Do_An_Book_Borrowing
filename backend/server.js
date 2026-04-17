@@ -20,7 +20,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth',       require('./src/routes/auth.routes'));
 app.use('/api/books',      require('./src/routes/book.routes'));
 app.use('/api/categories', require('./src/routes/category.routes'));
-app.use('/api/borrows',    require('./src/routes/borrow.routes'));
+app.use('/api/borrows',        require('./src/routes/borrow.routes'));
+app.use('/api/admin',          require('./src/routes/admin.routes'));
+app.use('/api/notifications',  require('./src/routes/notification.routes'));
 
 app.get('/', (req, res) => res.json({ message: 'Library API is running' }));
 

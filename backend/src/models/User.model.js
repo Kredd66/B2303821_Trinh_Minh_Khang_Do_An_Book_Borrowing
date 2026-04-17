@@ -9,15 +9,15 @@ const userSchema = new mongoose.Schema(
     role:      { type: String, enum: ['reader', 'admin'], default: 'reader' },
     studentId: { type: String, trim: true, default: '' },
     phone:     { type: String, trim: true, default: '' },
+    isActive:  { type: Boolean, default: true },
   },
   { timestamps: true }
 );
 
 // Hash password trước khi save
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 12);
-  next();
 });
 
 // So sánh password khi login
