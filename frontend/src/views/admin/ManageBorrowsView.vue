@@ -298,10 +298,13 @@ const handleLost = async (record) => {
 }
 
 const handleApproveRenewal = async (record) => {
-  if (!confirm('Duyệt gia hạn thêm 7 ngày cho các cuốn sách đang xin gia hạn?')) return
+  const bookIds = getTargetBookIds(record)
+  const label   = bookIds ? `${bookIds.length} cuốn đã chọn` : 'tất cả yêu cầu gia hạn'
+  if (!confirm(`Duyệt gia hạn thêm 7 ngày cho ${label}?`)) return
+
   approvingRenewal.value = record._id
   try {
-    const res = await borrowApi.approveRenewal(record._id)
+    const res = await borrowApi.approveRenewal(record._id, { bookIds })
     toast.success(res.data.message)
     fetchData(pagination.value.page)
   } catch (err) {

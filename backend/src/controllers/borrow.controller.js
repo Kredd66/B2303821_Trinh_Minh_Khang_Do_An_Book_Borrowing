@@ -228,7 +228,7 @@ const returnBorrow = async (req, res) => {
     if (!['approved', 'overdue', 'partial_returned'].includes(record.status))
       return errorResponse(res, 400, 'Phiếu không ở trạng thái đang mượn');
 
-    const { bookIds, returnNote } = req.body;
+    const { bookIds, returnNote } = req.body || {};
     // Nếu không truyền bookIds → trả tất cả sách đang mượn
     const targetIds = bookIds?.length
       ? bookIds.map(String)
@@ -318,7 +318,7 @@ const reportLostBook = async (req, res) => {
     if (!['approved', 'overdue', 'partial_returned'].includes(record.status))
       return errorResponse(res, 400, 'Phiếu không ở trạng thái đang mượn');
 
-    const { bookIds, note } = req.body;
+    const { bookIds, note } = req.body || {};
     const targetIds = bookIds?.length
       ? bookIds.map(String)
       : record.items.filter(i => i.itemStatus === 'borrowing').map(i => i.bookId.toString());
@@ -434,7 +434,7 @@ const approveRenewal = async (req, res) => {
     const record = await BorrowRecord.findById(req.params.id);
     if (!record) return errorResponse(res, 404, 'Không tìm thấy phiếu mượn');
 
-    const { bookIds } = req.body;
+    const { bookIds } = req.body || {};
     const targetIds = bookIds?.length
       ? bookIds.map(String)
       : record.items.filter(i => i.renewalRequested).map(i => i.bookId.toString());
